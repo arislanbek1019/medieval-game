@@ -23,7 +23,7 @@
   #hud { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; color: #bbb; flex-wrap: wrap; gap: 6px;}
   #scoreBox { display: flex; gap: 12px; flex-wrap: wrap; }
   #statusBox { font-weight: 500; color: #fff; }
-  .board { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid #333; background: #274a1f; }
+  .board { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid #333; background: #2e5424; }
   canvas { display: block; width: 100%; height: auto; touch-action: none; }
   #joyZone { position: absolute; left: 0; bottom: 0; width: 45%; height: 100%; }
   #joyBase { position: absolute; display: none; width: 80px; height: 80px; border-radius: 50%; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4); }
@@ -37,6 +37,26 @@
   #btnRoll { background: rgba(99,153,34,0.85); }
   #btnPick { background: rgba(186,117,23,0.85); }
   footer { font-size: 12px; color: #777; margin-top: 12px; text-align: center; max-width: 680px; }
+
+  /* Overlay screens (menu / game over) */
+  .overlay {
+    position: absolute; inset: 0;
+    background: rgba(20,20,18,0.92);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 24px; z-index: 10; border-radius: 12px;
+  }
+  .overlay h2 { font-size: 22px; font-weight: 500; margin: 0 0 6px; }
+  .overlay p { font-size: 14px; color: #bbb; margin: 0 0 18px; max-width: 420px; line-height: 1.5; }
+  .menuBtn {
+    background: #D85A30; color: #fff; border: none; border-radius: 8px;
+    padding: 12px 28px; font-size: 15px; font-family: inherit; cursor: pointer; margin: 6px 0;
+  }
+  .menuBtn.secondary { background: transparent; border: 1px solid #666; color: #ddd; }
+  .statsTable { margin: 12px 0 20px; font-size: 14px; width: 100%; max-width: 320px; border-collapse: collapse; }
+  .statsTable td { padding: 6px 8px; border-bottom: 1px solid #333; }
+  .statsTable td:last-child { text-align: right; font-weight: 500; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; vertical-align: middle; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -51,6 +71,20 @@
   </div>
   <div class="board">
     <canvas id="cv" width="640" height="420"></canvas>
+
+    <div id="menuScreen" class="overlay">
+      <h2>Castle Heist</h2>
+      <p>Ты — рыцарь на маленькой карте с замком в центре. Схвати корону и донеси до своих ворот трижды раньше соперников. Бочки можно разбивать, в кустах тебя хуже видно, на карте появляются яблоки, сапоги и большой меч.</p>
+      <button class="menuBtn" id="btnStart">Начать игру</button>
+    </div>
+
+    <div id="overScreen" class="overlay hidden">
+      <h2 id="overTitle">Игра окончена</h2>
+      <table class="statsTable" id="statsTable"></table>
+      <button class="menuBtn" id="btnAgain">Играть снова</button>
+      <button class="menuBtn secondary" id="btnMenu">В главное меню</button>
+    </div>
+
     <div id="joyZone"></div>
     <div id="joyBase"></div>
     <div id="joyStick"></div>
@@ -75,6 +109,8 @@
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
 const W=640,H=420;
 const scoreBox=document.getElementById('scoreBox'), statusBox=document.getElementById('statusBox');
+const menuScreen=document.getElementById('menuScreen'), overScreen=document.getElementById('overScreen');
+const statsTable=document.getElementById('statsTable'), overTitle=document.getElementById('overTitle');
 
 const COLORS=['#378ADD','#D85A30','#639922','#BA7517','#7F77DD','#D4537E'];
 const NAMES=['Ты','Сэр Борин','Леди Мира','Рыцарь Грук','Барон Лес','Конрад Щит'];
@@ -88,38 +124,48 @@ const bases=[
  {x:50,y:50},{x:590,y:50},{x:50,y:370},{x:590,y:370}
 ].slice(0,PLAYER_COUNT);
 
-const trees=[];
-for(let i=0;i<18;i++){trees.push({x:rand(90,550),y:rand(90,330),r:14});}
 const center={x:320,y:210};
 const houses=[{x:150,y:120,w:50,h:36},{x:470,y:280,w:54,h:38},{x:160,y:300,w:46,h:34}];
-const bushes=[{x:230,y:140,w:60,h:34},{x:380,y:280,w:60,h:34},{x:230,y:300,w:50,h:30},{x:400,y:130,w:50,h:30}];
-let barrels=[];
-for(let i=0;i<7;i++){barrels.push({x:rand(150,490),y:rand(150,280),alive:true,r:11});}
+const bushes=[{x:230,y:140,w:62,h:36},{x:380,y:280,w:62,h:36},{x:230,y:300,w:52,h:32},{x:400,y:130,w:52,h:32}];
 
-let crown={x:center.x,y:center.y,carrier:-1};
+let trees=[], barrels=[], powerups=[], players=[], crown, gameOver, frame, winnerId;
 
-let powerups=[];
+function resetWorld(){
+ trees=[];
+ for(let i=0;i<18;i++){
+  let t,tries=0;
+  do{
+   t={x:rand(90,550),y:rand(90,330),r:rand(13,17)};
+   tries++;
+  } while(tries<20 && (Math.hypot(t.x-center.x,t.y-center.y)<70));
+  trees.push(t);
+ }
+ barrels=[];
+ for(let i=0;i<7;i++){barrels.push({x:rand(150,490),y:rand(150,280),alive:true,r:11});}
+ powerups=[];
+ crown={x:center.x,y:center.y,carrier:-1};
+ players=[];
+ for(let i=0;i<PLAYER_COUNT;i++){
+  players.push({
+   id:i,name:NAMES[i],color:COLORS[i],isBot:i!==0,
+   x:bases[i].x+rand(-10,10),y:bases[i].y+rand(-10,10),
+   hp:100,baseSpeed:2.1,score:0,alive:true,
+   facing:0,attackCD:0,dashCD:0,rollCD:0,
+   shielded:false,shieldTimer:0,speedBoost:0,dmgBoost:0,
+   hidden:false,respawnT:0
+  });
+ }
+ gameOver=false; frame=0; winnerId=-1;
+ statusBox.textContent='';
+}
+
 function spawnPowerup(){
  if(powerups.length>=2)return;
  const types=['apple','boots','sword'];
  const t=types[Math.floor(rand(0,3))];
  powerups.push({type:t,x:rand(100,540),y:rand(100,360),t:0});
 }
-setInterval(spawnPowerup,7000);
-spawnPowerup();
-
-let players=[];
-for(let i=0;i<PLAYER_COUNT;i++){
- players.push({
-  id:i,name:NAMES[i],color:COLORS[i],isBot:i!==0,
-  x:bases[i].x+rand(-10,10),y:bases[i].y+rand(-10,10),
-  hp:100,speed:2.1,baseSpeed:2.1,score:0,alive:true,
-  facing:0,attackCD:0,shieldCD:0,dashCD:0,rollCD:0,
-  shielded:false,shieldTimer:0,speedBoost:0,dmgBoost:0,
-  hidden:false,respawnT:0,
-  ai:{state:'seek',targetAngle:0,wander:0}
- });
-}
+let powerupInterval=null;
 
 let keys={};
 window.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true; if(e.key===' ')e.preventDefault();});
@@ -207,7 +253,14 @@ function spawnAt(x,y){
  powerups.push({type:types[Math.floor(rand(0,3))],x,y,t:0});
 }
 
-function updatePlayer(p,dt,move,wantAttack,wantDash,wantRoll,wantPick){
+function endGame(winner){
+ gameOver=true; winnerId=winner.id;
+ statusBox.textContent=winner.name+' побеждает с 3 коронами!';
+ clearInterval(powerupInterval);
+ showOverScreen(winner);
+}
+
+function updatePlayer(p,move,wantAttack,wantDash,wantRoll,wantPick){
  if(!p.alive){
   p.respawnT--;
   if(p.respawnT<=0){
@@ -217,7 +270,6 @@ function updatePlayer(p,dt,move,wantAttack,wantDash,wantRoll,wantPick){
   return;
  }
  p.attackCD=Math.max(0,p.attackCD-1);
- p.shieldCD=Math.max(0,p.shieldCD-1);
  p.dashCD=Math.max(0,p.dashCD-1);
  p.rollCD=Math.max(0,p.rollCD-1);
  if(p.shieldTimer>0){p.shieldTimer--; if(p.shieldTimer<=0)p.shielded=false;}
@@ -267,12 +319,11 @@ function updatePlayer(p,dt,move,wantAttack,wantDash,wantRoll,wantPick){
   const base=bases[p.id];
   if(Math.hypot(p.x-base.x,p.y-base.y)<30){
    p.score++; crown.carrier=-1; crown.x=center.x; crown.y=center.y;
-   if(p.score>=3){ statusBox.textContent=p.name+' побеждает с 3 коронами!'; gameOver=true; }
+   if(p.score>=3){ endGame(p); }
   }
  }
 }
 
-let gameOver=false;
 function botMove(p){
  if(!p.alive)return {move:{x:0,y:0},att:false,dash:false,roll:false,pick:false};
  let target=null;
@@ -305,31 +356,93 @@ function botMove(p){
  return {move,att,dash,roll,pick};
 }
 
+/* ---------- Improved nature rendering ---------- */
+function drawTree(t){
+ // shadow
+ ctx.fillStyle='rgba(0,0,0,0.18)';
+ ctx.beginPath(); ctx.ellipse(t.x+3,t.y+t.r*0.7,t.r*0.9,t.r*0.35,0,0,7); ctx.fill();
+ // trunk
+ ctx.fillStyle='#5a3d22';
+ ctx.fillRect(t.x-3,t.y+t.r*0.2,6,t.r*0.9);
+ // canopy: 3 overlapping circles, darker outline so it pops against grass
+ const shades=['#1f3d18','#2f5224','#3f6b30'];
+ ctx.beginPath(); ctx.arc(t.x-t.r*0.45,t.y-t.r*0.1,t.r*0.7,0,7); ctx.fillStyle=shades[0]; ctx.fill();
+ ctx.beginPath(); ctx.arc(t.x+t.r*0.45,t.y-t.r*0.1,t.r*0.7,0,7); ctx.fillStyle=shades[0]; ctx.fill();
+ ctx.beginPath(); ctx.arc(t.x,t.y-t.r*0.55,t.r*0.85,0,7); ctx.fillStyle=shades[1]; ctx.fill();
+ ctx.strokeStyle='rgba(15,30,10,0.6)'; ctx.lineWidth=1.5; ctx.stroke();
+ // highlight
+ ctx.beginPath(); ctx.arc(t.x-t.r*0.2,t.y-t.r*0.75,t.r*0.4,0,7); ctx.fillStyle=shades[2]; ctx.fill();
+}
+function drawBush(b){
+ const cx=b.x+b.w/2, cy=b.y+b.h/2;
+ ctx.fillStyle='rgba(0,0,0,0.15)';
+ ctx.beginPath(); ctx.ellipse(cx+2,cy+b.h*0.35,b.w*0.5,b.h*0.22,0,0,7); ctx.fill();
+ ctx.fillStyle='#2c5520';
+ ctx.beginPath(); ctx.ellipse(cx,cy,b.w/2,b.h/2,0,0,7); ctx.fill();
+ ctx.strokeStyle='rgba(15,35,10,0.7)'; ctx.lineWidth=1.5; ctx.stroke();
+ ctx.fillStyle='#3f7530';
+ ctx.beginPath(); ctx.ellipse(cx-b.w*0.18,cy-b.h*0.18,b.w*0.3,b.h*0.28,0,0,7); ctx.fill();
+ ctx.beginPath(); ctx.ellipse(cx+b.w*0.2,cy-b.h*0.1,b.w*0.26,b.h*0.24,0,0,7); ctx.fill();
+ // little berries for texture
+ ctx.fillStyle='#5a9a3f';
+ for(let i=0;i<3;i++){
+  ctx.beginPath(); ctx.arc(cx+rand(-b.w*0.3,b.w*0.3),cy+rand(-b.h*0.25,b.h*0.25),1.6,0,7); ctx.fill();
+ }
+}
+
 function draw(){
  ctx.clearRect(0,0,W,H);
+ // grass base with subtle texture stripes
  ctx.fillStyle='#3c6b2f'; ctx.fillRect(0,0,W,H);
+ ctx.fillStyle='rgba(255,255,255,0.03)';
+ for(let i=0;i<W;i+=40){ ctx.fillRect(i,0,20,H); }
+ // river/bridge
  ctx.fillStyle='#3a78b5'; ctx.fillRect(0,190,W,40);
+ ctx.fillStyle='rgba(255,255,255,0.12)';
+ for(let i=0;i<W;i+=24){ ctx.fillRect(i,200,12,3); ctx.fillRect(i+8,215,12,3); }
  ctx.fillStyle='#8a6238'; ctx.fillRect(290,190,60,40);
+ ctx.strokeStyle='#5c3a1a'; ctx.lineWidth=2;
+ for(let i=295;i<345;i+=10){ ctx.beginPath(); ctx.moveTo(i,190); ctx.lineTo(i,230); ctx.stroke(); }
+ // castle center
  ctx.fillStyle='#7d7d78'; ctx.fillRect(center.x-40,center.y-40,80,80);
- ctx.fillStyle='#5c5c58'; ctx.fillRect(center.x-44,center.y-44,12,12);
+ ctx.fillStyle='#5c5c58';
+ ctx.fillRect(center.x-44,center.y-44,12,12);
  ctx.fillRect(center.x+32,center.y-44,12,12);
  ctx.fillRect(center.x-44,center.y+32,12,12);
  ctx.fillRect(center.x+32,center.y+32,12,12);
- ctx.fillStyle='#9a6b3f';
- for(const h of houses){ ctx.fillRect(h.x,h.y,h.w,h.h); ctx.fillStyle='#6b3f24'; ctx.beginPath();ctx.moveTo(h.x-4,h.y);ctx.lineTo(h.x+h.w/2,h.y-16);ctx.lineTo(h.x+h.w+4,h.y);ctx.fill(); ctx.fillStyle='#9a6b3f';}
+ // bases
  for(let i=0;i<bases.length;i++){
   ctx.fillStyle=COLORS[i]+'55';
   ctx.beginPath(); ctx.arc(bases[i].x,bases[i].y,26,0,7); ctx.fill();
   ctx.strokeStyle=COLORS[i]; ctx.lineWidth=2; ctx.stroke();
  }
- for(const t of trees){ ctx.fillStyle='#2f5224'; ctx.beginPath();ctx.arc(t.x,t.y,t.r,0,7);ctx.fill(); ctx.fillStyle='#5a3d22'; ctx.fillRect(t.x-2,t.y+t.r-4,4,8);}
- for(const b of barrels){ if(!b.alive)continue; ctx.fillStyle='#8a5a2c'; ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.fill(); ctx.strokeStyle='#5c3a1a'; ctx.stroke();}
- for(const bs of bushes){ ctx.fillStyle='rgba(40,90,30,0.85)'; ctx.beginPath(); ctx.ellipse(bs.x+bs.w/2,bs.y+bs.h/2,bs.w/2,bs.h/2,0,0,7); ctx.fill();}
+ // houses
+ for(const h of houses){
+  ctx.fillStyle='#9a6b3f'; ctx.fillRect(h.x,h.y,h.w,h.h);
+  ctx.fillStyle='#6b3f24';
+  ctx.beginPath(); ctx.moveTo(h.x-4,h.y); ctx.lineTo(h.x+h.w/2,h.y-16); ctx.lineTo(h.x+h.w+4,h.y); ctx.fill();
+  ctx.fillStyle='#4a2c18'; ctx.fillRect(h.x+h.w/2-6,h.y+h.h-16,12,16);
+ }
+ // bushes drawn before trees+barrels so trees feel taller
+ for(const bs of bushes){ drawBush(bs); }
+ // barrels
+ for(const b of barrels){
+  if(!b.alive)continue;
+  ctx.fillStyle='#8a5a2c'; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,7); ctx.fill();
+  ctx.strokeStyle='#5c3a1a'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.strokeStyle='#3f2814';
+  ctx.beginPath(); ctx.moveTo(b.x-b.r,b.y-3); ctx.lineTo(b.x+b.r,b.y-3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(b.x-b.r,b.y+3); ctx.lineTo(b.x+b.r,b.y+3); ctx.stroke();
+ }
+ // trees on top (drawn last among scenery so they read clearly)
+ for(const t of trees){ drawTree(t); }
+ // powerups
  for(const pu of powerups){
   ctx.font='20px sans-serif'; ctx.textAlign='center';
   const icon = pu.type==='apple'?'🍎':pu.type==='boots'?'👢':'⚔️';
   ctx.fillText(icon,pu.x,pu.y+7);
  }
+ // players
  for(const p of players){
   if(!p.alive)continue;
   ctx.globalAlpha = p.hidden?0.35:1;
@@ -362,10 +475,26 @@ function updateHUD(){
  }
 }
 
-let frame=0;
+function showOverScreen(winner){
+ overTitle.textContent = winner.isBot ? winner.name+' побеждает!' : 'Победа!';
+ const sorted=[...players].sort((a,b)=>b.score-a.score);
+ statsTable.innerHTML='';
+ sorted.forEach((p,i)=>{
+  const tr=document.createElement('tr');
+  const tdName=document.createElement('td');
+  tdName.innerHTML='<span class="swatch" style="background:'+p.color+'"></span>'+(i+1)+'. '+p.name;
+  const tdScore=document.createElement('td');
+  tdScore.textContent=p.score+' корон';
+  tr.appendChild(tdName); tr.appendChild(tdScore);
+  statsTable.appendChild(tr);
+ });
+ overScreen.classList.remove('hidden');
+}
+
+let running=false;
 function loop(){
- frame++;
- if(!gameOver){
+ if(running && !gameOver){
+  frame++;
   for(const p of players){
    let move,att,dash,roll,pick;
    if(!p.isBot){
@@ -385,14 +514,36 @@ function loop(){
     const b=botMove(p);
     move=b.move; att=b.att; dash=b.dash; roll=b.roll; pick=b.pick;
    }
-   updatePlayer(p,1,move,att,dash,roll,pick);
+   updatePlayer(p,move,att,dash,roll,pick);
   }
   if(frame%10===0) updateHUD();
  }
  draw();
  requestAnimationFrame(loop);
 }
+
+function startGame(){
+ resetWorld();
+ updateHUD();
+ menuScreen.classList.add('hidden');
+ overScreen.classList.add('hidden');
+ running=true;
+ clearInterval(powerupInterval);
+ powerupInterval=setInterval(spawnPowerup,7000);
+ spawnPowerup();
+}
+
+document.getElementById('btnStart').addEventListener('click',startGame);
+document.getElementById('btnAgain').addEventListener('click',startGame);
+document.getElementById('btnMenu').addEventListener('click',()=>{
+ running=false;
+ overScreen.classList.add('hidden');
+ menuScreen.classList.remove('hidden');
+});
+
+resetWorld();
 updateHUD();
+draw();
 loop();
 })();
 </script>

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Castle Heist — Осада замка</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    background: #1b1b1a;
+    color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 4px; }
+  p.sub { font-size: 13px; color: #aaa; margin: 0 0 14px; text-align: center; }
+  .wrap { position: relative; width: 100%; max-width: 680px; }
+  #hud { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; color: #bbb; flex-wrap: wrap; gap: 6px;}
+  #scoreBox { display: flex; gap: 12px; flex-wrap: wrap; }
+  #statusBox { font-weight: 500; color: #fff; }
+  .board { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid #333; background: #274a1f; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; }
+  #joyZone { position: absolute; left: 0; bottom: 0; width: 45%; height: 100%; }
+  #joyBase { position: absolute; display: none; width: 80px; height: 80px; border-radius: 50%; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4); }
+  #joyStick { position: absolute; display: none; width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.6); }
+  #touchBtns { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+  #touchBtns button { border: none; color: #fff; font-size: 12px; font-family: inherit; cursor: pointer; }
+  #btnAttack { width: 64px; height: 64px; border-radius: 50%; background: rgba(216,90,48,0.85); }
+  .smallBtns { display: flex; gap: 8px; }
+  .smallBtns button { width: 50px; height: 50px; border-radius: 50%; font-size: 11px; }
+  #btnDash { background: rgba(55,138,221,0.85); }
+  #btnRoll { background: rgba(99,153,34,0.85); }
+  #btnPick { background: rgba(186,117,23,0.85); }
+  footer { font-size: 12px; color: #777; margin-top: 12px; text-align: center; max-width: 680px; }
+</style>
+</head>
+<body>
+
+<h1>Castle Heist — Осада замка</h1>
+<p class="sub">Укради корону из центра и донеси её к своим воротам трижды раньше других рыцарей.</p>
+
+<div class="wrap">
+  <div id="hud">
+    <div id="scoreBox"></div>
+    <div id="statusBox"></div>
+  </div>
+  <div class="board">
+    <canvas id="cv" width="640" height="420"></canvas>
+    <div id="joyZone"></div>
+    <div id="joyBase"></div>
+    <div id="joyStick"></div>
+    <div id="touchBtns">
+      <button id="btnAttack">Удар</button>
+      <div class="smallBtns">
+        <button id="btnDash">Рывок</button>
+        <button id="btnRoll">Кувырок</button>
+        <button id="btnPick">E</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  ПК: WASD/стрелки — движение, ЛКМ — удар, Shift — рывок, Пробел — перекат, E — поднять/бросить корону.<br>
+  Телефон: стик слева, кнопки справа.
+</footer>
+
+<script>
+(function(){
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const W=640,H=420;
+const scoreBox=document.getElementById('scoreBox'), statusBox=document.getElementById('statusBox');
+
+const COLORS=['#378ADD','#D85A30','#639922','#BA7517','#7F77DD','#D4537E'];
+const NAMES=['Ты','Сэр Борин','Леди Мира','Рыцарь Грук','Барон Лес','Конрад Щит'];
+const BOT_COUNT=3;
+const PLAYER_COUNT=BOT_COUNT+1;
+
+function rand(a,b){return a+Math.random()*(b-a);}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+
+const bases=[
+ {x:50,y:50},{x:590,y:50},{x:50,y:370},{x:590,y:370}
+].slice(0,PLAYER_COUNT);
+
+const trees=[];
+for(let i=0;i<18;i++){trees.push({x:rand(90,550),y:rand(90,330),r:14});}
+const center={x:320,y:210};
+const houses=[{x:150,y:120,w:50,h:36},{x:470,y:280,w:54,h:38},{x:160,y:300,w:46,h:34}];
+const bushes=[{x:230,y:140,w:60,h:34},{x:380,y:280,w:60,h:34},{x:230,y:300,w:50,h:30},{x:400,y:130,w:50,h:30}];
+let barrels=[];
+for(let i=0;i<7;i++){barrels.push({x:rand(150,490),y:rand(150,280),alive:true,r:11});}
+
+let crown={x:center.x,y:center.y,carrier:-1};
+
+let powerups=[];
+function spawnPowerup(){
+ if(powerups.length>=2)return;
+ const types=['apple','boots','sword'];
+ const t=types[Math.floor(rand(0,3))];
+ powerups.push({type:t,x:rand(100,540),y:rand(100,360),t:0});
+}
+setInterval(spawnPowerup,7000);
+spawnPowerup();
+
+let players=[];
+for(let i=0;i<PLAYER_COUNT;i++){
+ players.push({
+  id:i,name:NAMES[i],color:COLORS[i],isBot:i!==0,
+  x:bases[i].x+rand(-10,10),y:bases[i].y+rand(-10,10),
+  hp:100,speed:2.1,baseSpeed:2.1,score:0,alive:true,
+  facing:0,attackCD:0,shieldCD:0,dashCD:0,rollCD:0,
+  shielded:false,shieldTimer:0,speedBoost:0,dmgBoost:0,
+  hidden:false,respawnT:0,
+  ai:{state:'seek',targetAngle:0,wander:0}
+ });
+}
+
+let keys={};
+window.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true; if(e.key===' ')e.preventDefault();});
+window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+let mouseDown=false;
+cv.addEventListener('mousedown',()=>mouseDown=true);
+cv.addEventListener('mouseup',()=>mouseDown=false);
+
+let actionFlags={attack:false,dash:false,roll:false,pick:false};
+document.getElementById('btnAttack').addEventListener('touchstart',e=>{e.preventDefault();actionFlags.attack=true;});
+document.getElementById('btnAttack').addEventListener('mousedown',()=>actionFlags.attack=true);
+document.getElementById('btnDash').addEventListener('touchstart',e=>{e.preventDefault();actionFlags.dash=true;});
+document.getElementById('btnDash').addEventListener('mousedown',()=>actionFlags.dash=true);
+document.getElementById('btnRoll').addEventListener('touchstart',e=>{e.preventDefault();actionFlags.roll=true;});
+document.getElementById('btnRoll').addEventListener('mousedown',()=>actionFlags.roll=true);
+document.getElementById('btnPick').addEventListener('touchstart',e=>{e.preventDefault();actionFlags.pick=true;});
+document.getElementById('btnPick').addEventListener('mousedown',()=>actionFlags.pick=true);
+
+let joyVec={x:0,y:0,active:false};
+const joyZone=document.getElementById('joyZone'), joyBase=document.getElementById('joyBase'), joyStick=document.getElementById('joyStick');
+let joyOrigin={x:0,y:0};
+function joyStart(cx,cy){
+ const r=cv.getBoundingClientRect();
+ joyOrigin={x:cx-r.left,y:cy-r.top};
+ joyBase.style.left=(joyOrigin.x-40)+'px'; joyBase.style.top=(joyOrigin.y-40)+'px';
+ joyBase.style.display='block'; joyStick.style.display='block';
+ joyVec.active=true;
+}
+function joyMove(cx,cy){
+ if(!joyVec.active)return;
+ const r=cv.getBoundingClientRect();
+ let dx=(cx-r.left)-joyOrigin.x, dy=(cy-r.top)-joyOrigin.y;
+ const m=Math.hypot(dx,dy), max=40;
+ if(m>max){dx=dx/m*max;dy=dy/m*max;}
+ joyStick.style.left=(joyOrigin.x+dx-18)+'px'; joyStick.style.top=(joyOrigin.y+dy-18)+'px';
+ joyVec.x=dx/max; joyVec.y=dy/max;
+}
+function joyEnd(){joyVec.active=false;joyVec.x=0;joyVec.y=0;joyBase.style.display='none';joyStick.style.display='none';}
+joyZone.addEventListener('touchstart',e=>{e.preventDefault();const t=e.touches[0];joyStart(t.clientX,t.clientY);});
+joyZone.addEventListener('touchmove',e=>{e.preventDefault();const t=e.touches[0];joyMove(t.clientX,t.clientY);});
+joyZone.addEventListener('touchend',e=>{e.preventDefault();joyEnd();});
+
+function rectsOverlap(x,y,r,rx,ry,rw,rh){
+ return x+r>rx-2 && x-r<rx+rw+2 && y+r>ry-2 && y-r<ry+rh+2;
+}
+function collide(p,nx,ny){
+ for(const h of houses){ if(rectsOverlap(nx,ny,14,h.x,h.y,h.w,h.h)) return true; }
+ for(const t of trees){ if(Math.hypot(nx-t.x,ny-t.y)<t.r+12) return true; }
+ return nx<16||nx>W-16||ny<16||ny>H-16;
+}
+function inBush(x,y){
+ for(const b of bushes){ if(x>b.x&&x<b.x+b.w&&y>b.y&&y<b.y+b.h) return true; }
+ return false;
+}
+
+function attackHit(attacker){
+ for(const p of players){
+  if(p===attacker||!p.alive)continue;
+  const d=dist(attacker,p);
+  const ang=Math.atan2(p.y-attacker.y,p.x-attacker.x);
+  let diff=Math.abs(ang-attacker.facing);
+  if(diff>Math.PI)diff=2*Math.PI-diff;
+  if(d<46 && diff<1.0){
+   if(p.shielded){ continue; }
+   let dmg=18*(attacker.dmgBoost>0?2:1);
+   p.hp-=dmg;
+   const kx=Math.cos(ang),ky=Math.sin(ang);
+   p.x+=kx*10; p.y+=ky*10;
+   if(p.hp<=0){
+    p.alive=false; p.respawnT=180;
+    if(crown.carrier===p.id){ crown.carrier=-1; crown.x=p.x; crown.y=p.y; }
+   }
+  }
+ }
+ for(const b of barrels){
+  if(!b.alive)continue;
+  const d=Math.hypot(attacker.x-b.x,attacker.y-b.y);
+  if(d<46){ b.alive=false;
+   if(Math.random()<0.4) spawnAt(b.x,b.y);
+  }
+ }
+}
+function spawnAt(x,y){
+ const types=['apple','boots','sword'];
+ powerups.push({type:types[Math.floor(rand(0,3))],x,y,t:0});
+}
+
+function updatePlayer(p,dt,move,wantAttack,wantDash,wantRoll,wantPick){
+ if(!p.alive){
+  p.respawnT--;
+  if(p.respawnT<=0){
+   p.alive=true; p.hp=100;
+   const b=bases[p.id]; p.x=b.x+rand(-10,10); p.y=b.y+rand(-10,10);
+  }
+  return;
+ }
+ p.attackCD=Math.max(0,p.attackCD-1);
+ p.shieldCD=Math.max(0,p.shieldCD-1);
+ p.dashCD=Math.max(0,p.dashCD-1);
+ p.rollCD=Math.max(0,p.rollCD-1);
+ if(p.shieldTimer>0){p.shieldTimer--; if(p.shieldTimer<=0)p.shielded=false;}
+ if(p.speedBoost>0)p.speedBoost--;
+ if(p.dmgBoost>0)p.dmgBoost--;
+
+ let sp=p.baseSpeed*(p.speedBoost>0?1.5:1)*(crown.carrier===p.id?0.8:1);
+ let mvx=move.x, mvy=move.y;
+ const m=Math.hypot(mvx,mvy);
+ if(m>0.05){
+  mvx/=Math.max(m,1); mvy/=Math.max(m,1);
+  p.facing=Math.atan2(mvy,mvx);
+  let nx=p.x+mvx*sp, ny=p.y+mvy*sp;
+  if(!collide(p,nx,p.y))p.x=nx;
+  if(!collide(p,p.x,ny))p.y=ny;
+ }
+ p.hidden=inBush(p.x,p.y);
+
+ if(wantDash && p.dashCD<=0){
+  p.x+=Math.cos(p.facing)*40; p.y+=Math.sin(p.facing)*40;
+  p.x=Math.max(16,Math.min(W-16,p.x)); p.y=Math.max(16,Math.min(H-16,p.y));
+  p.dashCD=120;
+ }
+ if(wantRoll && p.rollCD<=0){
+  p.x+=Math.cos(p.facing)*22; p.y+=Math.sin(p.facing)*22;
+  p.x=Math.max(16,Math.min(W-16,p.x)); p.y=Math.max(16,Math.min(H-16,p.y));
+  p.rollCD=60; p.shielded=true; p.shieldTimer=10;
+ }
+ if(wantAttack && p.attackCD<=0){
+  p.attackCD=28; attackHit(p);
+ }
+ if(wantPick){
+  if(crown.carrier===-1 && dist(p,crown)<34){ crown.carrier=p.id; }
+  else if(crown.carrier===p.id){ crown.carrier=-1; crown.x=p.x; crown.y=p.y; }
+ }
+ for(let i=powerups.length-1;i>=0;i--){
+  const pu=powerups[i];
+  if(Math.hypot(p.x-pu.x,p.y-pu.y)<24){
+   if(pu.type==='apple')p.hp=Math.min(100,p.hp+40);
+   if(pu.type==='boots')p.speedBoost=600;
+   if(pu.type==='sword')p.dmgBoost=900;
+   powerups.splice(i,1);
+  }
+ }
+ if(crown.carrier===p.id){
+  crown.x=p.x; crown.y=p.y;
+  const base=bases[p.id];
+  if(Math.hypot(p.x-base.x,p.y-base.y)<30){
+   p.score++; crown.carrier=-1; crown.x=center.x; crown.y=center.y;
+   if(p.score>=3){ statusBox.textContent=p.name+' побеждает с 3 коронами!'; gameOver=true; }
+  }
+ }
+}
+
+let gameOver=false;
+function botMove(p){
+ if(!p.alive)return {move:{x:0,y:0},att:false,dash:false,roll:false,pick:false};
+ let target=null;
+ if(crown.carrier===-1){
+  target=crown;
+ } else if(crown.carrier===p.id){
+  target=bases[p.id];
+ } else {
+  const carrierP=players[crown.carrier];
+  if(carrierP && dist(p,carrierP)<220 && !carrierP.hidden){ target=carrierP; }
+  else target={x:center.x+rand(-60,60),y:center.y+rand(-60,60)};
+ }
+ let dx=target.x-p.x, dy=target.y-p.y;
+ const m=Math.hypot(dx,dy)||1;
+ let move={x:dx/m,y:dy/m};
+ let att=false,dash=false,roll=false,pick=false;
+ let nearestEnemy=null,nd=999;
+ for(const o of players){
+  if(o===p||!o.alive||o.hidden)continue;
+  const d=dist(p,o);
+  if(d<nd){nd=d;nearestEnemy=o;}
+ }
+ if(nearestEnemy && nd<48){
+  p.facing=Math.atan2(nearestEnemy.y-p.y,nearestEnemy.x-p.x);
+  att=Math.random()<0.5;
+  if(p.hp<40 && Math.random()<0.3) roll=true;
+ }
+ if(nearestEnemy && nd<150 && crown.carrier===p.id && Math.random()<0.02) dash=true;
+ if((crown.carrier===-1 && dist(p,crown)<30) || (crown.carrier===p.id && dist(p,bases[p.id])<30)) pick=true;
+ return {move,att,dash,roll,pick};
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ ctx.fillStyle='#3c6b2f'; ctx.fillRect(0,0,W,H);
+ ctx.fillStyle='#3a78b5'; ctx.fillRect(0,190,W,40);
+ ctx.fillStyle='#8a6238'; ctx.fillRect(290,190,60,40);
+ ctx.fillStyle='#7d7d78'; ctx.fillRect(center.x-40,center.y-40,80,80);
+ ctx.fillStyle='#5c5c58'; ctx.fillRect(center.x-44,center.y-44,12,12);
+ ctx.fillRect(center.x+32,center.y-44,12,12);
+ ctx.fillRect(center.x-44,center.y+32,12,12);
+ ctx.fillRect(center.x+32,center.y+32,12,12);
+ ctx.fillStyle='#9a6b3f';
+ for(const h of houses){ ctx.fillRect(h.x,h.y,h.w,h.h); ctx.fillStyle='#6b3f24'; ctx.beginPath();ctx.moveTo(h.x-4,h.y);ctx.lineTo(h.x+h.w/2,h.y-16);ctx.lineTo(h.x+h.w+4,h.y);ctx.fill(); ctx.fillStyle='#9a6b3f';}
+ for(let i=0;i<bases.length;i++){
+  ctx.fillStyle=COLORS[i]+'55';
+  ctx.beginPath(); ctx.arc(bases[i].x,bases[i].y,26,0,7); ctx.fill();
+  ctx.strokeStyle=COLORS[i]; ctx.lineWidth=2; ctx.stroke();
+ }
+ for(const t of trees){ ctx.fillStyle='#2f5224'; ctx.beginPath();ctx.arc(t.x,t.y,t.r,0,7);ctx.fill(); ctx.fillStyle='#5a3d22'; ctx.fillRect(t.x-2,t.y+t.r-4,4,8);}
+ for(const b of barrels){ if(!b.alive)continue; ctx.fillStyle='#8a5a2c'; ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.fill(); ctx.strokeStyle='#5c3a1a'; ctx.stroke();}
+ for(const bs of bushes){ ctx.fillStyle='rgba(40,90,30,0.85)'; ctx.beginPath(); ctx.ellipse(bs.x+bs.w/2,bs.y+bs.h/2,bs.w/2,bs.h/2,0,0,7); ctx.fill();}
+ for(const pu of powerups){
+  ctx.font='20px sans-serif'; ctx.textAlign='center';
+  const icon = pu.type==='apple'?'🍎':pu.type==='boots'?'👢':'⚔️';
+  ctx.fillText(icon,pu.x,pu.y+7);
+ }
+ for(const p of players){
+  if(!p.alive)continue;
+  ctx.globalAlpha = p.hidden?0.35:1;
+  ctx.fillStyle=p.color;
+  ctx.beginPath(); ctx.arc(p.x,p.y,13,0,7); ctx.fill();
+  ctx.strokeStyle='#222'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.strokeStyle='#ddd'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x+Math.cos(p.facing)*22,p.y+Math.sin(p.facing)*22); ctx.stroke();
+  if(p.shielded){ ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath();ctx.arc(p.x,p.y,18,0,7);ctx.stroke();}
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#000a'; ctx.fillRect(p.x-15,p.y-24,30,4);
+  ctx.fillStyle = p.hp>50?'#639922':p.hp>25?'#BA7517':'#D85A30';
+  ctx.fillRect(p.x-15,p.y-24,30*(p.hp/100),4);
+  ctx.font='10px sans-serif'; ctx.fillStyle='#fff'; ctx.textAlign='center';
+  ctx.fillText(p.name,p.x,p.y-27);
+  if(crown.carrier===p.id){ ctx.font='16px sans-serif'; ctx.fillText('👑',p.x,p.y-32); }
+ }
+ if(crown.carrier===-1){
+  ctx.font='22px sans-serif'; ctx.textAlign='center'; ctx.fillText('👑',crown.x,crown.y+8);
+ }
+}
+
+function updateHUD(){
+ scoreBox.innerHTML='';
+ for(const p of players){
+  const span=document.createElement('span');
+  span.style.color=p.color;
+  span.textContent=p.name+': '+p.score;
+  scoreBox.appendChild(span);
+ }
+}
+
+let frame=0;
+function loop(){
+ frame++;
+ if(!gameOver){
+  for(const p of players){
+   let move,att,dash,roll,pick;
+   if(!p.isBot){
+    let mx=0,my=0;
+    if(keys['a']||keys['arrowleft'])mx-=1;
+    if(keys['d']||keys['arrowright'])mx+=1;
+    if(keys['w']||keys['arrowup'])my-=1;
+    if(keys['s']||keys['arrowdown'])my+=1;
+    if(joyVec.active){mx+=joyVec.x;my+=joyVec.y;}
+    move={x:mx,y:my};
+    att=mouseDown||actionFlags.attack;
+    dash=keys['shift']||actionFlags.dash;
+    roll=keys[' ']||actionFlags.roll;
+    pick=keys['e']||actionFlags.pick;
+    actionFlags={attack:false,dash:false,roll:false,pick:false};
+   } else {
+    const b=botMove(p);
+    move=b.move; att=b.att; dash=b.dash; roll=b.roll; pick=b.pick;
+   }
+   updatePlayer(p,1,move,att,dash,roll,pick);
+  }
+  if(frame%10===0) updateHUD();
+ }
+ draw();
+ requestAnimationFrame(loop);
+}
+updateHUD();
+loop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Корона на пепле — визуальная новелла</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html,body {
+    margin: 0; padding: 0; min-height: 100vh;
+    background: #0c0a12; color: #f3ecff;
+    font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #app { width: 100%; max-width: 980px; padding: 14px; }
+  #stage {
+    position: relative; width: 100%; aspect-ratio: 16/9;
+    border-radius: 16px; overflow: hidden; border: 2px solid #4a3a6e;
+    background: #1b1430; box-shadow: 0 0 60px rgba(120,80,220,0.25);
+  }
+  .bg { position: absolute; inset: 0; transition: background 0.7s ease; }
+  .bg::after{ content:''; position:absolute; inset:0; background-image: radial-gradient(rgba(255,255,255,0.5) 1px, transparent 1.5px); background-size: 60px 60px; opacity:0.05; }
+  .vignette { position:absolute; inset:0; box-shadow: inset 0 0 140px 50px rgba(5,2,12,0.7); pointer-events:none; }
+  .glow-top { position:absolute; top:0; left:0; right:0; height:40%; background: radial-gradient(ellipse at 50% 0%, rgba(255,200,140,0.18), transparent 70%); pointer-events:none; }
+
+  .charWrap { position:absolute; bottom: 24%; left:50%; transform: translateX(-50%); display:flex; gap: 46px; align-items:flex-end; }
+  .char {
+    width: 128px; opacity: 0; transform: translateY(20px) scale(0.94);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    position: relative; filter: drop-shadow(0 14px 18px rgba(0,0,0,0.55));
+  }
+  .char.show { opacity: 1; transform: translateY(0) scale(1); }
+  .char svg { width: 100%; height: auto; display:block; }
+  .char .label {
+    text-align:center; margin-top:6px; font-size:13px; letter-spacing:0.04em; color:#e8d9ff;
+    text-shadow: 0 0 6px rgba(170,130,255,0.6);
+  }
+
+  #textbox {
+    position: absolute; left: 18px; right: 18px; bottom: 16px;
+    background: linear-gradient(180deg, rgba(28,18,46,0.92), rgba(14,9,24,0.95));
+    border: 1px solid #6a4fa3; border-radius: 14px;
+    padding: 16px 20px; min-height: 110px;
+    box-shadow: 0 0 24px rgba(130,90,220,0.18);
+  }
+  #speaker { font-size: 15px; color: #ffc266; margin: 0 0 6px; letter-spacing: 0.03em; font-weight: 700; text-shadow: 0 0 8px rgba(255,170,60,0.4); }
+  #storyText { font-size: 16.5px; line-height: 1.65; margin: 0; min-height: 56px; font-family: Georgia, 'Times New Roman', serif; color: #f3ecff; }
+  #continueHint { position:absolute; right:18px; bottom:12px; font-size:11px; color:#a892d8; }
+
+  #choices { margin-top: 12px; display: flex; flex-direction: column; gap: 9px; }
+  .choiceBtn {
+    background: linear-gradient(180deg, rgba(120,90,200,0.16), rgba(80,60,150,0.12));
+    border: 1px solid #7a5fc0; color: #f3ecff;
+    padding: 11px 16px; border-radius: 10px; font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 14.5px;
+    text-align: left; cursor: pointer; transition: background 0.2s, border-color 0.2s, transform 0.15s;
+  }
+  .choiceBtn:hover { background: linear-gradient(180deg, rgba(255,180,90,0.22), rgba(180,120,255,0.16)); border-color: #ffc266; transform: translateX(3px); }
+
+  .overlay {
+    position: absolute; inset: 0; background: radial-gradient(circle at 50% 30%, rgba(60,30,100,0.96), rgba(8,5,14,0.98));
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 28px; z-index: 10;
+  }
+  .overlay.hidden { display: none; }
+  .title { font-size: 34px; letter-spacing: 0.02em; color: #ffc266; margin: 0 0 10px; font-weight: 700;
+    text-shadow: 0 0 18px rgba(255,170,60,0.45); font-family: Georgia, 'Times New Roman', serif; }
+  .subtitle { font-size: 14.5px; color: #cdbfe8; margin: 0 0 24px; max-width: 520px; line-height: 1.7; }
+  .menuBtn {
+    background: linear-gradient(180deg,#ffd27a,#ffaa3d); color: #2a1605; border: none; border-radius: 10px;
+    padding: 12px 32px; font-size: 15px; font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; cursor: pointer; margin: 6px 0;
+    font-weight: 700; box-shadow: 0 4px 14px rgba(255,170,60,0.35);
+  }
+  .menuBtn.secondary { background: transparent; border: 1px solid #7a5fc0; color: #e8d9ff; box-shadow:none; }
+  .endingLabel { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #b88fff; margin-bottom: 10px; }
+  .statsRow { font-size: 12px; color: #9a8cc0; margin-top: 18px; }
+
+  footer { font-size: 12.5px; color: #8a7cae; margin-top: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <div class="bg" id="bgLayer"></div>
+    <div class="glow-top"></div>
+    <div class="vignette"></div>
+    <div class="charWrap" id="charWrap"></div>
+
+    <div id="textbox">
+      <p id="speaker"></p>
+      <p id="storyText"></p>
+      <div id="choices"></div>
+      <div id="continueHint">нажми, чтобы продолжить ▸</div>
+    </div>
+
+    <div class="overlay" id="menuScreen">
+      <p class="title">Корона на пепле</p>
+      <p class="subtitle">Десять лет назад тебя изгнали из родного города, заклеймив предателем. Сегодня ты возвращаешься, чтобы вернуть трон — или потерять последнее, что у тебя осталось. Тёмное фэнтези с несколькими концовками.</p>
+      <button class="menuBtn" id="btnStart">Начать историю</button>
+    </div>
+
+    <div class="overlay hidden" id="endScreen">
+      <p class="endingLabel" id="endLabel">Конец</p>
+      <p class="title" id="endTitle">Концовка</p>
+      <p class="subtitle" id="endText"></p>
+      <button class="menuBtn" id="btnRestart">Начать заново</button>
+      <button class="menuBtn secondary" id="btnMenu2">В главное меню</button>
+      <p class="statsRow" id="endStats"></p>
+    </div>
+  </div>
+  <footer>Нажимай на текст, чтобы продолжить, и выбирай реплики, когда они появляются. История запоминает твои решения.</footer>
+</div>
+
+<script>
+(function(){
+const bgLayer=document.getElementById('bgLayer');
+const charWrap=document.getElementById('charWrap');
+const speakerEl=document.getElementById('speaker');
+const storyText=document.getElementById('storyText');
+const choicesEl=document.getElementById('choices');
+const continueHint=document.getElementById('continueHint');
+const textbox=document.getElementById('textbox');
+const menuScreen=document.getElementById('menuScreen');
+const endScreen=document.getElementById('endScreen');
+
+const BACKGROUNDS={
+ gate:      'linear-gradient(180deg,#3a2a5c 0%,#221839 55%,#120c22 100%)',
+ tavern:    'linear-gradient(180deg,#5c3a2a 0%,#39220f 55%,#1a0f08 100%)',
+ alley:     'linear-gradient(180deg,#241c40 0%,#150f28 55%,#0a0716 100%)',
+ camp:      'linear-gradient(180deg,#3a2c50 0%,#1f1733 55%,#0d0a1a 100%)',
+ walls:     'linear-gradient(180deg,#4a2e3c 0%,#28182a 55%,#120a15 100%)',
+ corridor:  'linear-gradient(180deg,#2c1f4a 0%,#180f2c 55%,#0a0617 100%)',
+ throne:    'linear-gradient(180deg,#5c1f3a 0%,#330f24 55%,#160810 100%)',
+ endinggood:'linear-gradient(180deg,#4a3a14 0%,#2c2008 55%,#140e04 100%)',
+ endingbad: 'linear-gradient(180deg,#4a1020 0%,#2a0812 55%,#120508 100%)',
+ endingneutral:'linear-gradient(180deg,#241c40 0%,#150f28 55%,#0a0716 100%)'
+};
+function setBg(key){ bgLayer.style.background = BACKGROUNDS[key]||BACKGROUNDS.gate; }
+
+/* simple anime-style avatars: circle head, big eyes, hair shape, color body */
+const CHAR_SVG={
+ aidan: `<svg viewBox="0 0 120 200" xmlns="http://www.w3.org/2000/svg">
+   <ellipse cx="60" cy="178" rx="38" ry="20" fill="#241a3e"/>
+   <rect x="32" y="92" width="56" height="86" rx="20" fill="#3d2d6e"/>
+   <rect x="32" y="92" width="56" height="30" rx="14" fill="#5a4a9c"/>
+   <circle cx="60" cy="58" r="34" fill="#f1d9c2"/>
+   <path d="M26 50 Q30 8 60 10 Q92 6 96 50 Q90 30 60 30 Q32 30 26 50Z" fill="#241a3e"/>
+   <path d="M22 50 Q18 78 30 92 L30 60 Z" fill="#241a3e"/>
+   <path d="M98 50 Q102 78 90 92 L90 60 Z" fill="#241a3e"/>
+   <circle cx="47" cy="60" r="5.5" fill="#7a5fc0"/>
+   <circle cx="73" cy="60" r="5.5" fill="#7a5fc0"/>
+   <circle cx="47" cy="58" r="1.8" fill="#fff"/>
+   <circle cx="73" cy="58" r="1.8" fill="#fff"/>
+   <path d="M52 76 Q60 80 68 76" stroke="#9c7a5a" stroke-width="2" fill="none" stroke-linecap="round"/>
+ </svg>`,
+ lira: `<svg viewBox="0 0 120 200" xmlns="http://www.w3.org/2000/svg">
+   <ellipse cx="60" cy="178" rx="38" ry="20" fill="#3a0f14"/>
+   <rect x="32" y="92" width="56" height="86" rx="20" fill="#7a2030"/>
+   <rect x="32" y="92" width="56" height="30" rx="14" fill="#a83c4a"/>
+   <circle cx="60" cy="58" r="34" fill="#e8c2a8"/>
+   <path d="M22 56 Q20 4 60 8 Q100 2 100 58 Q104 100 86 110 Q92 70 84 50 Q60 36 36 50 Q28 70 34 110 Q16 100 22 56Z" fill="#3a0f14"/>
+   <path d="M30 96 L22 132" stroke="#3a0f14" stroke-width="10" stroke-linecap="round"/>
+   <circle cx="47" cy="62" r="5.5" fill="#2a8a6a"/>
+   <circle cx="73" cy="62" r="5.5" fill="#2a8a6a"/>
+   <circle cx="47" cy="60" r="1.8" fill="#fff"/>
+   <circle cx="73" cy="60" r="1.8" fill="#fff"/>
+   <path d="M40 46 L34 38" stroke="#c98a8a" stroke-width="3" stroke-linecap="round"/>
+   <path d="M52 80 Q60 76 68 80" stroke="#9c5a4a" stroke-width="2" fill="none" stroke-linecap="round"/>
+ </svg>`,
+ dorian: `<svg viewBox="0 0 120 200" xmlns="http://www.w3.org/2000/svg">
+   <ellipse cx="60" cy="178" rx="38" ry="20" fill="#0e2a2a"/>
+   <rect x="30" y="90" width="60" height="88" rx="14" fill="#1c5a5a"/>
+   <rect x="30" y="90" width="60" height="22" rx="8" fill="#2c7a7a"/>
+   <circle cx="60" cy="58" r="34" fill="#d9b896"/>
+   <path d="M26 48 Q26 10 60 12 Q94 10 94 48 L90 56 Q86 30 60 28 Q34 30 30 56Z" fill="#16201c"/>
+   <circle cx="47" cy="62" r="5.5" fill="#3a8ec9"/>
+   <circle cx="73" cy="62" r="5.5" fill="#3a8ec9"/>
+   <circle cx="47" cy="60" r="1.8" fill="#fff"/>
+   <circle cx="73" cy="60" r="1.8" fill="#fff"/>
+   <path d="M44 80 Q60 72 76 80" stroke="#7a5a3c" stroke-width="2" fill="none" stroke-linecap="round"/>
+   <rect x="44" y="92" width="32" height="6" fill="#ffc266"/>
+ </svg>`,
+ magnus: `<svg viewBox="0 0 120 200" xmlns="http://www.w3.org/2000/svg">
+   <ellipse cx="60" cy="178" rx="40" ry="20" fill="#2c1c08"/>
+   <rect x="28" y="88" width="64" height="90" rx="12" fill="#5c3c10"/>
+   <rect x="28" y="88" width="64" height="24" rx="8" fill="#8a6020"/>
+   <circle cx="60" cy="56" r="35" fill="#d9b08e"/>
+   <path d="M30 44 Q24 10 60 10 Q96 10 90 44" stroke="#9a9a9a" stroke-width="6" fill="none"/>
+   <circle cx="47" cy="60" r="5.5" fill="#7a2020"/>
+   <circle cx="73" cy="60" r="5.5" fill="#7a2020"/>
+   <circle cx="47" cy="58" r="1.8" fill="#fff"/>
+   <circle cx="73" cy="58" r="1.8" fill="#fff"/>
+   <path d="M40 84 Q60 70 80 84 L78 96 Q60 86 42 96 Z" fill="#cfcfcf"/>
+   <rect x="34" y="6" width="52" height="14" rx="4" fill="#ffd27a"/>
+   <circle cx="44" cy="6" r="5" fill="#e8475c"/>
+   <circle cx="60" cy="2" r="5" fill="#3a8ec9"/>
+   <circle cx="76" cy="6" r="5" fill="#5acb6e"/>
+ </svg>`
+};
+const CHAR_NAMES={aidan:'Эйдан',lira:'Лира',dorian:'Дориан',magnus:'Магнус'};
+function setChars(list){
+ charWrap.innerHTML='';
+ list.forEach(id=>{
+  const d=document.createElement('div');
+  d.className='char';
+  d.innerHTML = CHAR_SVG[id] + '<div class="label">'+CHAR_NAMES[id]+'</div>';
+  charWrap.appendChild(d);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>d.classList.add('show')));
+ });
+}
+
+/* ---------------- Story state ---------------- */
+let flags={ruthless:0, mercy:0, trustLira:false, trustDorian:false, suspectDorian:false, renounce:false, alone:false};
+let typing=false, typeTimer=null, pendingCb=null;
+
+function resetState(){
+ flags={ruthless:0, mercy:0, trustLira:false, trustDorian:false, suspectDorian:false, renounce:false, alone:false};
+}
+
+/* ---------------- Story graph ---------------- */
+const STORY={
+ n_start:{ bg:'gate', chars:['aidan'], speaker:'',
+  text:'Десять лет назад тебя, наследника дома Вэйрен, изгнали из столицы Эльдеры с клеймом предателя — труда твоего дяди Магнуса, который занял трон. Сегодня ты стоишь у городских ворот под чужим именем. В кармане плаща — кольцо твоей покойной матери, последнее доказательство твоей крови.',
+  choices:[
+   {label:'Войти тайно, под видом наёмника', next:'n_enter_stealth'},
+   {label:'Откинуть капюшон и назвать своё имя страже', next:'n_enter_open'}
+  ]},
+
+ n_enter_stealth:{ bg:'gate', chars:['aidan'],
+  text:'Ты прячешь лицо под капюшоном и проходишь мимо стражи, смешавшись с торговым караваном. Никто не узнаёт в усталом путнике потерянного наследника. В тенях переулков тебя уже ждёт связной повстанцев.',
+  choices:[{label:'Идти на встречу', next:'n_meet_lira'}] },
+
+ n_enter_open:{ bg:'gate', chars:['aidan'],
+  text:'Ты откидываешь капюшон. «Я — Эйдан из дома Вэйрен, законный наследник этого города». Стражники замирают — кто-то из них помнит твоё лицо по старым портретам. Слух о твоём возвращении взлетает над городом быстрее, чем ты успеваешь скрыться.',
+  choices:[{label:'Скрыться в переулках, пока не поздно', next:'n_meet_lira'}] },
+
+ n_meet_lira:{ bg:'tavern', chars:['aidan','lira'], speaker:'Лира',
+  text:'В заброшенной таверне у доков тебя встречает женщина со шрамом через бровь — Лира, командующая Пепельных Клинков, повстанцев, что годами жгут обозы Магнуса. «Десять лет я ждала, что наследник либо вернётся, либо сгниёт в канаве», — говорит она, не убирая руки с кинжала. «Докажи, что ты не самозванец».',
+  choices:[
+   {label:'Показать кольцо матери и рассказать правду', next:'n_lira_trust', effect:f=>{f.trustLira=true; f.mercy++;}},
+   {label:'Потребовать уважения, как к будущему королю', next:'n_lira_distrust', effect:f=>{f.ruthless++;}}
+  ]},
+
+ n_lira_trust:{ bg:'tavern', chars:['aidan','lira'],
+  text:'Лира долго смотрит на кольцо, затем кивает. «Хорошо. Я помогу тебе — но не ради короны. Ради людей, что гниют в темницах Магнуса». Она верит тебе, и однажды это доверие может спасти твою жизнь.',
+  choices:[{label:'Продолжить', next:'n_dorian_intro'}] },
+
+ n_lira_distrust:{ bg:'tavern', chars:['aidan','lira'],
+  text:'Лира холодно усмехается. «Корона делает из людей таких же тиранов, как твой дядя». Она соглашается помочь — но её клинки больше не покрывают твою спину так, как могли бы.',
+  choices:[{label:'Продолжить', next:'n_dorian_intro'}] },
+
+ n_dorian_intro:{ bg:'alley', chars:['aidan','dorian'], speaker:'Дориан',
+  text:'На третью ночь к вам присоединяется Дориан — командир дворцовой стражи, человек, который, по слухам, тайно хранит верность памяти твоего отца. «Войска у южных ворот будут открыты в ночь штурма», — обещает он. «Но дайте слово: после трона не будет резни среди моих людей».',
+  choices:[
+   {label:'Дать слово и полностью довериться ему', next:'n_dorian_trust', effect:f=>{f.trustDorian=true;}},
+   {label:'Согласиться, но велеть Лире присматривать за ним', next:'n_dorian_suspect', effect:f=>{f.trustDorian=true; f.suspectDorian=true;}},
+   {label:'Отказаться — слишком похоже на ловушку', next:'n_dorian_reject', effect:f=>{f.ruthless++;}}
+  ]},
+
+ n_dorian_trust:{ bg:'alley', chars:['aidan','dorian'],
+  text:'Ты пожимаешь его руку без колебаний. Дориан удовлетворённо кивает и растворяется в темноте, обещая открыть ворота в ночь штурма.',
+  choices:[{label:'Продолжить', next:'n_march'}] },
+
+ n_dorian_suspect:{ bg:'alley', chars:['aidan','dorian','lira'],
+  text:'Ты соглашаешься — но позже шепчешь Лире присмотреть за генералом. Она хмурится, но кивает: «Если он предаст, я узнаю первой».',
+  choices:[{label:'Продолжить', next:'n_march'}] },
+
+ n_dorian_reject:{ bg:'alley', chars:['aidan','dorian'],
+  text:'«Мне не нужны генералы с двойным дном», — отвечаешь ты. Дориан уходит, оскорблённый отказом. Лира одобрительно хмыкает, но твоя армия теперь меньше на сотню клинков, а южные ворота останутся заперты.',
+  choices:[{label:'Продолжить', next:'n_march'}] },
+
+ n_march:{ bg:'camp', chars:['aidan','lira'], speaker:'',
+  text:'Недели проходят в подготовке: тайные встречи, переброска оружия, вербовка отчаявшихся горожан. Наконец ночь штурма столицы наступает. Пепельные Клинки выстраиваются у стен Эльдеры, а в небе кружат вороны, будто чувствуя кровь.',
+  choices:[
+   {label:'Штурмовать в лоб, не щадя стражу Магнуса', next:'n_siege_result', effect:f=>{f.ruthless+=2;}},
+   {label:'Прорываться к замку, щадя сдающихся стражников', next:'n_siege_result', effect:f=>{f.mercy++;}}
+  ]},
+
+ n_siege_result:{ bg:'walls', chars:['aidan','lira'],
+  text:'Бой у стен короток и кровав. Город просыпается от звона стали и крика «Вэйрен вернулся!». К рассвету внешние стены пали — но путь к трону всё ещё лежит через дворец, где тебя, возможно, ждут.',
+  choices:[{label:'Идти к тронному залу', next:'n_climax_router'}] },
+
+ n_climax_router:{ router:true, resolve:f => (f.trustDorian && !f.suspectDorian) ? 'n_betrayal' : 'n_no_betrayal' },
+
+ n_betrayal:{ bg:'corridor', chars:['aidan'], speaker:'Дориан (из-за двери)',
+  text:'У дверей тронного зала Дориан вдруг захлопывает створки снаружи и запирает засов. «Простите меня», — доносится его голос, дрожащий. «Магнус держит мою дочь. У меня не было выбора». Лира и твои бойцы отрезаны в коридоре. Дальше ты идёшь один.',
+  choices:[{label:'Идти вперёд в одиночку', next:'n_confrontation', effect:f=>{f.alone=true;}}] },
+
+ n_no_betrayal:{ bg:'corridor', chars:['aidan','lira'],
+  text:'Двери тронного зала распахиваются без сопротивления. Лира идёт рядом с обнажённым клинком, а за вами — то немногое, что осталось от твоей маленькой армии. Никто не предаёт тебя в последний миг.',
+  choices:[{label:'Войти в тронный зал', next:'n_confrontation'}] },
+
+ n_confrontation:{ bg:'throne', chars:['aidan','magnus'], speaker:'Магнус',
+  text:'Магнус сидит на украденном троне, корона сидит криво на седой голове. «Ты думаешь, что лучше меня? Десять лет я удерживал это королевство от гражданской войны голыми руками». Он медленно поднимается, кладя ладонь на рукоять меча.',
+  choices:[
+   {label:'Убить Магнуса на месте', next:'n_ending', effect:f=>{f.ruthless+=2;}},
+   {label:'Пощадить и изгнать его, как изгнали тебя', next:'n_ending', effect:f=>{f.mercy+=2;}},
+   {label:'Отдать его на суд горожан', next:'n_ending', effect:f=>{f.mercy++;}},
+   {label:'Отказаться от трона и уйти, оставив корону на полу', next:'n_ending', effect:f=>{f.renounce=true;}}
+  ]}
+};
+
+const ENDINGS={
+ just:{ key:'Лучшая концовка', title:'Истинный король', bg:'endinggood',
+  text:'Ты не один пришёл к этому трону, и не в одиночку решаешь его судьбу. Магнус судим, город исцеляется, а Лира остаётся подле тебя — не подданной, а другом. Эльдера впервые за десять лет засыпает без страха. Корона на твоей голове тяжела, но не из золота — из доверия, которое ты заслужил.' },
+ tyrant:{ key:'Тёмная концовка', title:'Тиран', bg:'endingbad',
+  text:'Трон твой, но руки в крови по локоть, и страх в глазах горожан — тот же, что был в глазах Магнуса. Лира уходит из дворца в ту же ночь, не оглянувшись. Годы спустя кто-то другой будет стоять у этих же ворот, готовя восстание против тебя.' },
+ tragedy:{ key:'Трагическая концовка', title:'Цена доверия', bg:'endingbad',
+  text:'Ты выходишь из тронного зала с короной, но без половины тех, кто шёл за тобой. Дориан так и не простил себе предательства и не пережил эту ночь. Лира молчит рядом с тобой, и в этом молчании — упрёк, который останется между вами навсегда. Ты правишь, но эта корона пахнет пеплом.' },
+ renounce:{ key:'Особая концовка', title:'Отречение', bg:'endingneutral',
+  text:'Ты снимаешь корону и кладёшь её на холодный камень трона. «Пусть город сам решит, кто им правит», — говоришь ты и уходишь прочь от дворца, который стоил тебе десяти лет жизни. Лира догоняет тебя у ворот. Дальше — дорога, а не трон. Возможно, впервые за долгое время ты по-настоящему свободен.' },
+ shaky:{ key:'Нейтральная концовка', title:'Шаткий трон', bg:'endingneutral',
+  text:'Ты садишься на трон, который добыл, но союзников рядом меньше, чем хотелось бы, а сомнений — больше. Город признаёт тебя королём, но шепчется по углам. Корона держится крепко лишь до тех пор, пока кто-то не решит проверить, насколько крепки твои руки.' }
+};
+
+function determineEnding(f){
+ if(f.renounce) return ENDINGS.renounce;
+ if(f.ruthless>=3) return ENDINGS.tyrant;
+ if(f.alone) return ENDINGS.tragedy;
+ if(f.trustLira && f.mercy>=2 && f.ruthless<=1) return ENDINGS.just;
+ return ENDINGS.shaky;
+}
+
+/* ---------------- Rendering / typewriter (bug-fixed) ---------------- */
+function clearTyping(){ if(typeTimer){clearInterval(typeTimer); typeTimer=null;} typing=false; }
+
+function finishTyping(fullText){
+ clearTyping();
+ storyText.textContent=fullText;
+ continueHint.style.opacity=1;
+ if(pendingCb){ const cb=pendingCb; pendingCb=null; cb(); }
+}
+
+function typeText(text, cb){
+ clearTyping();
+ storyText.textContent='';
+ let i=0;
+ typing=true;
+ pendingCb=cb;
+ continueHint.style.opacity=0;
+ typeTimer=setInterval(()=>{
+  storyText.textContent=text.slice(0,i+1);
+  i++;
+  if(i>=text.length){ finishTyping(text); }
+ },14);
+}
+
+function renderNode(id){
+ let node=STORY[id];
+ if(node && node.router){ id=node.resolve(flags); node=STORY[id]; }
+ if(id==='n_ending'){ showEnding(); return; }
+ const n=node;
+ setBg(n.bg);
+ setChars(n.chars||[]);
+ speakerEl.textContent = n.speaker || '';
+ choicesEl.innerHTML='';
+ choicesEl.style.display='none';
+ continueHint.style.display='none';
+
+ const fullText=n.text;
+ typeText(fullText, ()=>{
+  if(n.choices.length===1){
+   continueHint.style.display='block';
+  } else {
+   showChoices(n.choices);
+  }
+ });
+
+ textbox.onclick=(e)=>{
+  if(e.target.classList.contains('choiceBtn')) return;
+  if(typing){ finishTyping(fullText); return; }
+  if(n.choices.length===1){
+   advance(n.choices[0]);
+  }
+ };
+}
+
+function showChoices(choices){
+ choicesEl.innerHTML='';
+ choicesEl.style.display='flex';
+ continueHint.style.display='none';
+ choices.forEach(c=>{
+  const btn=document.createElement('button');
+  btn.className='choiceBtn';
+  btn.textContent=c.label;
+  btn.addEventListener('click',(e)=>{ e.stopPropagation(); advance(c); });
+  choicesEl.appendChild(btn);
+ });
+}
+
+function advance(choice){
+ if(choice.effect) choice.effect(flags);
+ renderNode(choice.next);
+}
+
+function showEnding(){
+ const e=determineEnding(flags);
+ document.getElementById('endLabel').textContent=e.key;
+ document.getElementById('endTitle').textContent=e.title;
+ document.getElementById('endText').textContent=e.text;
+ document.getElementById('endStats').textContent =
+  'Жестокость: '+flags.ruthless+' · Милосердие: '+flags.mercy+
+  ' · Доверие Лиры: '+(flags.trustLira?'да':'нет')+
+  ' · Доверие Дориана: '+(flags.trustDorian?'да':'нет');
+ bgLayer.style.background=BACKGROUNDS[e.bg];
+ charWrap.innerHTML='';
+ endScreen.classList.remove('hidden');
+}
+
+document.getElementById('btnStart').addEventListener('click',()=>{
+ resetState();
+ menuScreen.classList.add('hidden');
+ renderNode('n_start');
+});
+document.getElementById('btnRestart').addEventListener('click',()=>{
+ resetState();
+ endScreen.classList.add('hidden');
+ renderNode('n_start');
+});
+document.getElementById('btnMenu2').addEventListener('click',()=>{
+ endScreen.classList.add('hidden');
+ menuScreen.classList.remove('hidden');
+});
+
+setBg('gate');
+})();
+</script>
+</body>
+</html>
